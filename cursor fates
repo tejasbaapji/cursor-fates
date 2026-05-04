@@ -1,0 +1,272 @@
+<html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CURSOR FATES</title>
+<style>
+  body, html {
+    margin: 0; padding: 0; overflow: hidden; background: black; color: white;
+    font-family: Arial, sans-serif;
+    height: 100vh; width: 100vw;
+  }
+  canvas {
+    display: block;
+    background: black;
+  }
+  #heading {
+    position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+    font-size: 2.5rem; font-weight: bold; pointer-events: none;
+    z-index: 10;
+  }
+  #score {
+    position: fixed; top: 10px; right: 20px; font-size: 1.2rem;
+    font-weight: bold; color: #ff0; z-index: 10;
+  }
+  #outro {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    text-align: center; color: white; display: none; z-index: 20;
+  }
+  #outro h1 {
+    font-size: 4rem; margin-bottom: 20px;
+  }
+  #outro p {
+    font-size: 1.2rem; margin: 10px 0;
+  }
+  #retryBtn {
+    font-size: 1.5rem; padding: 10px 25px; background: red; border: none;
+    color: white; cursor: pointer; border-radius: 5px;
+  }
+</style>
+</head>
+<body>
+<div id="heading">CURSOR FATES:)</div>
+<div id="score">Duck Points: 0</div>
+<div id="outro">
+  <h1>Made by Shourya Mudgal</h1>
+  <p>Co powered by</p>
+  <p>Assistance of AI</p>
+  <p>Help of fellow peers</p>
+  <p id="finalScore" style="margin-top: 20px; font-size: 1.5rem;"></p>
+  <button id="retryBtn">Retry</button>
+</div>
+<canvas id="game"></canvas>
+<script>
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+  let width, height;
+
+  function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const launcher = {
+    x: width / 2,
+    y: height - 50,
+    angle: 0,
+    width: 60,
+    height: 20,
+    draw() {
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.angle);
+      // Launcher base white now
+      ctx.fillStyle = 'white';
+      ctx.fillRect(-this.width / 2, -this.height / 2, this.width, this.height);
+      // Launcher nozzle white
+      ctx.fillRect(this.width / 2 - 10, -7, 30, 14);
+      ctx.restore();
+    }
+  };
+
+  class Missile {
+    constructor(x, y, angle, followCursor = false, speed) {
+      this.x = x;
+      this.y = y;
+      this.angle = angle;
+      this.followCursor = followCursor;
+      this.speed = speed;
+      this.radius = 7;
+      this.active = true;
+      this.exploded = false;
+      this.explosionFrame = 0;
+    }
+    update(targetX, targetY) {
+      if (this.followCursor) {
+        const dx = targetX - this.x;
+        const dy = targetY - this.y;
+        this.angle = Math.atan2(dy, dx);
+      }
+      this.x += this.speed * Math.cos(this.angle);
+      this.y += this.speed * Math.sin(this.angle);
+      if (
+        this.x < -this.radius || this.x > width + this.radius ||
+        this.y < -this.radius || this.y > height + this.radius
+      ) {
+        this.active = false;
+      }
+    }
+    draw() {
+      if (this.exploded) {
+        this.drawExplosion();
+        return;
+      }
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      ctx.rotate(this.angle);
+      // Missile body
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, this.radius * 1.2, this.radius * 0.6, 0, 0, 2 * Math.PI);
+      ctx.fill();
+      // Missile tip
+      ctx.fillStyle = 'red';
+      ctx.beginPath();
+      ctx.moveTo(this.radius * 1.2, 0);
+      ctx.lineTo(this.radius * 1.8, this.radius * 0.5);
+      ctx.lineTo(this.radius * 1.8, -this.radius * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      // Flame (combustion) animation (white color only)
+      ctx.fillStyle = 'white';
+      ctx.beginPath();
+      const flameSize = Math.sin(Date.now() / 100) * 3 + 5;
+      ctx.ellipse(-this.radius, 0, flameSize, flameSize / 2, 0, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.restore();
+    }
+    drawExplosion() {
+      const maxFrames = 10;
+      ctx.save();
+      ctx.translate(this.x, this.y);
+      const radius = this.explosionFrame * 3;
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.restore();
+      this.explosionFrame++;
+      if (this.explosionFrame > maxFrames) {
+        this.active = false;
+      }
+    }
+    explode() {
+      this.exploded = true;
+      this.explosionFrame = 0;
+    }
+  }
+
+  let missiles = [];
+  let duckPoints = 0;
+  let clickCount = 0;
+  let gameOver = false;
+  let selfBoomTimeout = null;
+
+  const mouse = { x: width / 2, y: height / 2 };
+
+  function shootMissile() {
+    if (gameOver) return;
+    // Speed increases progressively with clicks (starts at 5, adds 0.4 per missile)
+    let baseSpeed = 5 + clickCount * 0.4;
+    // Following missile slower cap (so dodgable), max 7 speed
+    let followSpeed = Math.min(7, 4 + clickCount * 0.1);
+
+    let follow = (clickCount % 6 === 5);
+    let speed = follow ? followSpeed : baseSpeed;
+    let missile = new Missile(launcher.x, launcher.y, launcher.angle, follow, speed);
+    missiles.push(missile);
+
+    clickCount++;
+    duckPoints++;
+    document.getElementById('score').textContent = 'Duck Points: ' + duckPoints;
+
+    if (follow) {
+      if (selfBoomTimeout) clearTimeout(selfBoomTimeout);
+      selfBoomTimeout = setTimeout(() => {
+        missile.explode();
+        missiles = missiles.filter(m => m !== missile);
+      }, 15000);
+    }
+  }
+
+  function updateLauncherAngle() {
+    const dx = mouse.x - launcher.x;
+    const dy = mouse.y - launcher.y;
+    launcher.angle = Math.atan2(dy, dx);
+  }
+
+  function checkCollision(missile) {
+    const dx = missile.x - mouse.x;
+    const dy = missile.y - mouse.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return dist < missile.radius + 10; // cursor radius ~10px
+  }
+
+  function gameOverFunc() {
+    gameOver = true;
+    missiles.forEach(m => m.active = false);
+    document.getElementById('outro').style.display = 'block';
+    document.getElementById('finalScore').textContent = 'Your Duck Points: ' + duckPoints;
+    document.body.style.background = 'black';
+  }
+
+  document.getElementById('retryBtn').addEventListener('click', () => {
+    missiles = [];
+    duckPoints = 0;
+    clickCount = 0;
+    gameOver = false;
+    document.getElementById('outro').style.display = 'none';
+    document.getElementById('score').textContent = 'Duck Points: 0';
+    document.body.style.background = 'black';
+  });
+
+  window.addEventListener('mousemove', e => {
+    mouse.x = e.clientX;
+    mouse.y = e.clientY;
+    updateLauncherAngle();
+  });
+
+  window.addEventListener('click', () => {
+    shootMissile();
+  });
+
+  function drawCursor() {
+    ctx.save();
+    ctx.fillStyle = 'yellow';
+    ctx.beginPath();
+    ctx.arc(mouse.x, mouse.y, 10, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function loop() {
+    ctx.clearRect(0, 0, width, height);
+    launcher.draw();
+    drawCursor();
+
+    missiles.forEach(m => {
+      if (!m.active) return;
+      m.update(mouse.x, mouse.y);
+      m.draw();
+      if (!gameOver && checkCollision(m)) {
+        m.explode();
+        gameOverFunc();
+      }
+    });
+
+    missiles = missiles.filter(m => m.active);
+
+    requestAnimationFrame(loop);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
